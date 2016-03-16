@@ -122,6 +122,8 @@ class OpenIDConnectClient
      */
     private $certPath;
 
+	private $idToken;
+
     /**
      * @var string if we aquire an access token it will be stored here
      */
@@ -173,68 +175,69 @@ class OpenIDConnectClient
      */
     public function authenticate() {
 
-        // Do a preemptive check to see if the provider has thrown an error from a previous redirect
-        if (isset($_REQUEST['error'])) {
-            throw new OpenIDConnectClientException("Error: " . $_REQUEST['error'] . " Description: " . $_REQUEST['error_description']);
-        }
-
-        // If we have an authorization code then proceed to request a token
-        if (isset($_REQUEST["code"])) {
-
-            $code = $_REQUEST["code"];
-            $token_json = $this->requestTokens($code);
-
-            // Throw an error if the server returns one
-            if (isset($token_json->error)) {
-                throw new OpenIDConnectClientException($token_json->error_description);
-            }
-
-            // Do an OpenID Connect session check
-            if ($_REQUEST['state'] != $_SESSION['openid_connect_state']) {
-                throw new OpenIDConnectClientException("Unable to determine state");
-            }
-
-	    if (!property_exists($token_json, 'id_token')) {
-		throw new OpenIDConnectClientException("User did not authorize openid scope.");
-	    }
-
-            $claims = $this->decodeJWT($token_json->id_token, 1);
-
-	    // Verify the signature
-	    if ($this->canVerifySignatures()) {
-		if (!$this->verifyJWTsignature($token_json->id_token)) {
-		    throw new OpenIDConnectClientException ("Unable to verify signature");
+		// Do a preemptive check to see if the provider has thrown an error from a previous redirect
+		if (isset($_REQUEST['error'])) {
+		    throw new OpenIDConnectClientException("Error: " . $_REQUEST['error'] . " Description: " . $_REQUEST['error_description']);
 		}
-	    } else {
-		user_error("Warning: JWT signature verification unavailable.");
-	    }
 
-            // If this is a valid claim
-            if ($this->verifyJWTclaims($claims)) {
+		// If we have an authorization code then proceed to request a token
+		if (isset($_REQUEST["code"])) {
 
-                // Clean up the session a little
-                unset($_SESSION['openid_connect_nonce']);
+			$code = $_REQUEST["code"];
+			$token_json = $this->requestTokens($code);
 
-                // Save the access token
-                $this->accessToken = $token_json->access_token;
+			// Throw an error if the server returns one
+			if (isset($token_json->error)) {
+				throw new OpenIDConnectClientException($token_json->error_description);
+			}
 
-                // Save the refresh token, if we got one
-                if (isset($token_json->refresh_token)) $this->refreshToken = $token_json->refresh_token;
+			// Do an OpenID Connect session check
+			if ($_REQUEST['state'] != $_SESSION['openid_connect_state']) {
+				throw new OpenIDConnectClientException("Unable to determine state");
+			}
 
-                // Success!
-                return true;
+			if (!property_exists($token_json, 'id_token')) {
+				throw new OpenIDConnectClientException("User did not authorize openid scope.");
+			}
 
-            } else {
-                throw new OpenIDConnectClientException ("Unable to verify JWT claims");
-            }
+			$claims = $this->decodeJWT($token_json->id_token, 1);
 
-        } else {
+			// Verify the signature
+			if ($this->canVerifySignatures()) {
+				if (!$this->verifyJWTsignature($token_json->id_token)) {
+					throw new OpenIDConnectClientException ("Unable to verify signature");
+				}
+			} else {
+				user_error("Warning: JWT signature verification unavailable.");
+			}
 
-            $this->requestAuthorization();
-            return false;
-        }
+			// If this is a valid claim
+			if ($this->verifyJWTclaims($claims)) {
+				$this->idToken = $claims;
 
-    }
+				// Clean up the session a little
+				unset($_SESSION['openid_connect_nonce']);
+
+				// Save the access token
+				$this->accessToken = $token_json->access_token;
+
+				// Save the refresh token, if we got one
+				if (isset($token_json->refresh_token)) $this->refreshToken = $token_json->refresh_token;
+
+				// Success!
+				return true;
+
+			} else {
+				throw new OpenIDConnectClientException ("Unable to verify JWT claims");
+			}
+
+		} else {
+
+			$this->requestAuthorization();
+			return false;
+		}
+
+	}
 
     /**
      * @param $scope - example: openid, given_name, etc...
@@ -787,6 +790,13 @@ class OpenIDConnectClient
      */
     public function canVerifySignatures() {
       return class_exists('Crypt_RSA');
+    }
+
+    /**
+     * @return array
+     */
+    public function getIdToken() {
+        return (array)$this->idToken;
     }
 
     /**
